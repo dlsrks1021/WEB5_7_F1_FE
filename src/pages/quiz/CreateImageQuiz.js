@@ -1,25 +1,26 @@
 import {Button, Col, Form, Row, Stack} from "react-bootstrap";
-import QuizItem from "./QuizItem";
 import {useState} from "react";
-import {FontAwesomeIcon} from "@fortawesome/react-fontawesome"
-import {
-    faImage,
-    faListUl,
-    faPlus,
-    faSave,
-    faTimes
-} from "@fortawesome/free-solid-svg-icons";
+import {FontAwesomeIcon} from "@fortawesome/react-fontawesome";
+import {faImage, faListUl, faPlus, faSave, faTimes} from "@fortawesome/free-solid-svg-icons";
 import {useNavigate} from "react-router-dom";
 import useConfirm from "../../hooks/useConfirm";
 import axios from "axios";
 import {useApiMutation} from "../../hooks/useApiMutation";
 import Spinner from "../../shared/Spinner";
+import ImageQuizItem from "./ImageQuizItem";
+import imageCompression from 'browser-image-compression';
 
-const createQuizRequest = async ({ jsonData, thumbnailFile }) => {
+const createImageQuizRequest = async ({ jsonData, thumbnailFile, questionImageFiles }) => {
     const formData = new FormData();
     formData.append('request', new Blob([JSON.stringify(jsonData)], { type: 'application/json' }));
-    formData.append('thumbnailFile', thumbnailFile); // 이미지 파일
-    const response = await axios.post('/quizzes/text', formData, {
+    if (thumbnailFile) {
+        formData.append('thumbnailFile', thumbnailFile);
+    }
+    // 질문 이미지 배열 업로드 (서버에서 List<MultipartFile> 형태로 수신 가정)
+    questionImageFiles.forEach((file) => {
+        formData.append('questionImageFiles', file);
+    });
+    const response = await axios.post('/quizzes/image', formData, {
         headers: {
             'Content-Type': 'multipart/form-data',
         },
@@ -27,28 +28,27 @@ const createQuizRequest = async ({ jsonData, thumbnailFile }) => {
     return response.data;
 }
 
-const CreateQuiz = () => {
+const CreateImageQuiz = () => {
     const [quizImageFile, setQuizImageFile] = useState(null);
     const [quizTitle, setQuizTitle] = useState('');
     const [quizDescription, setQuizDescription] = useState('');
     const navigate = useNavigate();
     const { openConfirm } = useConfirm();
     const [items, setItems] = useState([
-        { content: '', answer: '' },
-        { content: '', answer: '' },
-        { content: '', answer: '' },
-        { content: '', answer: '' },
-        { content: '', answer: '' },
-        { content: '', answer: '' },
-        { content: '', answer: '' },
-        { content: '', answer: '' },
-        { content: '', answer: '' },
-        { content: '', answer: '' },
+        { imageFile: null, answer: '' },
+        { imageFile: null, answer: '' },
+        { imageFile: null, answer: '' },
+        { imageFile: null, answer: '' },
+        { imageFile: null, answer: '' },
+        { imageFile: null, answer: '' },
+        { imageFile: null, answer: '' },
+        { imageFile: null, answer: '' },
+        { imageFile: null, answer: '' },
+        { imageFile: null, answer: '' },
     ]);
 
-    const { mutate: createQuizMutate, isLoading } = useApiMutation(createQuizRequest, {
+    const { mutate: createQuizMutate, isLoading } = useApiMutation(createImageQuizRequest, {
         onSuccess: (data) => {
-            console.log('퀴즈 생성 성공:', data);
             openConfirm({
                 title: '저장이 완료되었습니다.',
                 callback: () => navigate('/quiz'),
@@ -64,7 +64,7 @@ const CreateQuiz = () => {
     };
 
     const handleQuizItemAdd = () => {
-        setItems([...items, { content: '', answer: '' }]);
+        setItems([...items, { imageFile: null, answer: '' }]);
     };
 
     const handleQuizItemRemove = (index) => {
@@ -72,40 +72,34 @@ const CreateQuiz = () => {
     };
 
     const isAllInputsFilled = items.length >= 10 && items.every(
-        (item) => item.content.trim() !== '' && item.answer.trim() !== ''
+        (item) => item.imageFile && item.answer.trim() !== ''
     );
 
     const handleSaveClick = () => {
-        // 공백 제거된 문자열 기준
         const trimmedTitle = quizTitle.trim();
         const trimmedDescription = quizDescription.trim();
 
-        // 제목 길이 확인
         if (trimmedTitle.length < 2 || trimmedTitle.length > 30) {
             openConfirm({title: '제목은 공백 제외 2~30자 사이여야 합니다.'});
             return;
         }
 
-        // 설명 길이 확인
         if (trimmedDescription.length < 10 || trimmedDescription.length > 50) {
             openConfirm({title: '설명은 공백 제외 10~50자 사이여야 합니다.'});
             return;
         }
 
-        // 퀴즈 수 확인
         if (items.length < 10 || items.length > 80) {
             openConfirm({title: '퀴즈는 최소 10개, 최대 80개까지 등록할 수 있습니다.'});
             return;
         }
 
-        // 각 문제의 길이와 정답 길이 확인
         for (let i = 0; i < items.length; i++) {
-            const { content, answer } = items[i];
-            const trimmedContent = content.trim();
+            const { imageFile, answer } = items[i];
             const trimmedAnswer = answer.trim();
 
-            if (trimmedContent.length < 5 || trimmedContent.length > 30) {
-                openConfirm({title: `문제 ${i + 1}의 내용은 공백 제외 5~30자 사이여야 합니다.`});
+            if (!imageFile) {
+                openConfirm({title: `문제 ${i + 1}의 이미지가 필요합니다.`});
                 return;
             }
 
@@ -115,26 +109,27 @@ const CreateQuiz = () => {
             }
         }
 
-        // 모든 조건 통과 시 API 호출
         const jsonData = {
             title: trimmedTitle,
-            quizType: 'TEXT',
+            quizType: 'IMAGE',
             description: trimmedDescription,
-            questions: items.map(({ content, answer }) => ({
-                content: content.trim(),
+            questions: items.map(({ answer }) => ({
                 answer: answer.trim(),
             })),
         };
 
+        const questionImageFiles = items.map(({ imageFile }) => imageFile);
+
         createQuizMutate({
             jsonData,
-            thumbnailFile: quizImageFile
+            thumbnailFile: quizImageFile,
+            questionImageFiles,
         });
     }
 
     const f1Styles = {
         container: {
-          backgroundColor: '#f5f5f5', // ✅ 밝은 전체 배경
+          backgroundColor: '#f5f5f5',
           color: '#222222',
           minHeight: '100vh',
           fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -147,14 +142,14 @@ const CreateQuiz = () => {
           marginBottom: '2rem',
         },
         card: {
-          backgroundColor: '#ffffff', // ✅ 카드도 밝게!
+          backgroundColor: '#ffffff',
           border: '1px solid #e0e0e0',
           borderRadius: '10px',
           padding: '1.5rem',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.05)', // 부드러운 그림자
+          boxShadow: '0 2px 12px rgba(0,0,0,0.05)',
         },
         input: {
-          backgroundColor: '#ffffff', // ✅ 입력칸도 흰색
+          backgroundColor: '#ffffff',
           border: '1px solid #ccc',
           borderRadius: '6px',
           color: '#222',
@@ -167,7 +162,7 @@ const CreateQuiz = () => {
           outline: 'none',
         },
         questionHeader: {
-          backgroundColor: '#f0f0f0', // ✅ 질문영역도 밝게
+          backgroundColor: '#f0f0f0',
           padding: '1rem',
           borderRadius: '10px 10px 0 0',
           borderBottom: '2px solid #e10600',
@@ -214,27 +209,23 @@ const CreateQuiz = () => {
           border: 'none',
         },
       };
-      
 
     return (
         <div style={f1Styles.container}>
             <Spinner show={isLoading} />
             <div className="container-fluid p-4" style={{ position: 'relative', zIndex: 1 }}>
-                {/* Header */}
                 <div style={{...f1Styles.header, position: 'relative', zIndex: 2}}>
                     <h1 className="mb-0" style={{ fontSize: '2.5rem', fontWeight: '700', color: '#e10600' }}>
-                        퀴즈 생성
+                        이미지 퀴즈 생성
                     </h1>
                     <p className="mb-0 mt-2" style={{ color: '#a0a0a0', fontSize: '1.1rem' }}>
-                        최고의 퀴즈 경험을 만들어보세요
+                        이미지로 문제를 만들고 텍스트로 정답을 입력하세요
                     </p>
                 </div>
 
                 <Row className="g-4 h-100">
-                    {/* Left Panel - Quiz Info */}
                     <Col lg={4}>
                         <div className="d-flex flex-column h-100">
-                            {/* Quiz Title */}
                             <div className="mb-4">
                                 <div style={f1Styles.card}>
                                     <div style={f1Styles.sectionTitle}>
@@ -256,7 +247,6 @@ const CreateQuiz = () => {
                                 </div>
                             </div>
 
-                            {/* Quiz Description */}
                             <div className="mb-4">
                                 <div style={f1Styles.card}>
                                     <div style={f1Styles.sectionTitle}>
@@ -278,12 +268,11 @@ const CreateQuiz = () => {
                                 </div>
                             </div>
 
-                            {/* Quiz Image */}
                             <div>
                                 <div style={f1Styles.card}>
                                     <div style={f1Styles.sectionTitle}>
                                         <FontAwesomeIcon icon={faImage} className="me-2" />
-                                        퀴즈 이미지
+                                        퀴즈 썸네일 이미지
                                     </div>
                                     {quizImageFile && (
                                         <div className="mb-3">
@@ -292,8 +281,9 @@ const CreateQuiz = () => {
                                                 alt="Quiz thumbnail" 
                                                 style={{
                                                     width: '100%',
-                                                    height: '200px',
-                                                    objectFit: 'cover',
+                                                    height: 'auto',
+                                                    maxHeight: '240px',
+                                                    objectFit: 'contain',
                                                     borderRadius: '4px',
                                                     border: '1px solid #38384a'
                                                 }}
@@ -303,7 +293,7 @@ const CreateQuiz = () => {
                                     <div className="d-flex gap-2">
                                         <Button 
                                             style={f1Styles.secondaryButton}
-                                            onClick={() => document.getElementById('imageInput').click()}
+                                            onClick={() => document.getElementById('imageInput-thumbnail').click()}
                                             className="flex-grow-1"
                                             onMouseEnter={(e) => {
                                                 e.target.style.backgroundColor = '#38384a';
@@ -335,13 +325,24 @@ const CreateQuiz = () => {
                                         )}
                                     </div>
                                     <input
-                                        id="imageInput"
+                                        id="imageInput-thumbnail"
                                         type="file"
                                         accept="image/*"
                                         style={{ display: 'none' }}
-                                        onChange={(e) => {
+                                        onChange={async (e) => {
                                             const file = e.target.files[0];
-                                            if (file) {
+                                            if (!file) {
+                                                setQuizImageFile(null);
+                                                return;
+                                            }
+                                            try {
+                                                const compressed = await imageCompression(file, {
+                                                    maxSizeMB: 1,
+                                                    useWebWorker: true,
+                                                });
+                                                const compressedFile = new File([compressed], file.name, { type: compressed.type || file.type });
+                                                setQuizImageFile(compressedFile);
+                                            } catch (err) {
                                                 setQuizImageFile(file);
                                             }
                                         }}
@@ -351,10 +352,8 @@ const CreateQuiz = () => {
                         </div>
                     </Col>
 
-                    {/* Right Panel - Questions */}
                     <Col lg={8}>
                         <div style={f1Styles.card} className="h-100 d-flex flex-column">
-                            {/* Questions Header */}
                             <div style={f1Styles.questionHeader}>
                                 <div className="d-flex justify-content-between align-items-center">
                                     <h3 className="mb-0" style={{ color: 'black', fontWeight: '600' }}>
@@ -366,11 +365,10 @@ const CreateQuiz = () => {
                                 </div>
                             </div>
 
-                            {/* Questions Grid Header */}
                             <div className="row py-3" style={{ backgroundColor: '#252538', margin: '0' }}>
                                 <div className="col-6 text-center">
                                     <strong style={{ color: '#e10600', fontSize: '0.9rem', textTransform: 'uppercase' }}>
-                                        질문
+                                        질문 이미지
                                     </strong>
                                 </div>
                                 <div className="col-6 text-center">
@@ -380,14 +378,13 @@ const CreateQuiz = () => {
                                 </div>
                             </div>
 
-                            {/* Questions List */}
                             <div style={f1Styles.scrollArea} className="flex-grow-1 py-3">
                                 <Stack gap={3}>
                                     {items.map((item, index) => (
-                                        <QuizItem
+                                        <ImageQuizItem
                                             key={index}
                                             index={index}
-                                            content={item.content}
+                                            imageFile={item.imageFile}
                                             answer={item.answer}
                                             onChange={handleQuizItemChange}
                                             onRemove={handleQuizItemRemove}
@@ -396,7 +393,6 @@ const CreateQuiz = () => {
                                 </Stack>
                             </div>
 
-                            {/* Action Buttons */}
                             <div className="pt-3 mt-auto" style={{ borderTop: '1px solid #38384a' }}>
                                 <div className="d-flex justify-content-center mb-3">
                                     <Button 
@@ -416,7 +412,7 @@ const CreateQuiz = () => {
                                         질문 추가
                                     </Button>
                                 </div>
-                                
+
                                 <Row className="g-3">
                                     <Col>
                                         <Button 
@@ -465,4 +461,6 @@ const CreateQuiz = () => {
     );
 }
 
-export default CreateQuiz;
+export default CreateImageQuiz;
+
+
